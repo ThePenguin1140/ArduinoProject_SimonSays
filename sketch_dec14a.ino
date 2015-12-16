@@ -42,6 +42,9 @@
 */
 
 #include "pitches.h" // Used for the MODE_BEEGEES, for playing the melody on the buzzer!
+#include <SPI.h> // File System
+#include <SD.h>  // SD Card 
+#include <LiquidCrystal.h>  //Screen
 
 #define CHOICE_OFF      0 //Used to control LEDs
 #define CHOICE_NONE     0 //Used to check buttons
@@ -61,6 +64,13 @@
 #define BUTTON_BLUE   8
 #define BUTTON_YELLOW 3
 
+#define RS 11
+#define E 12
+#define D4 13
+#define D5 A3
+#define D6 A2
+#define D7 A1
+
 // Buzzer pin definitions
 #define BUZZER  A5
 
@@ -71,9 +81,13 @@
 // Game state variables
 byte gameBoard[32]; //Contains the combination of buttons as we advance
 byte gameRound = 0; //Counts the number of succesful rounds the player has made it through
+char displayContent[2][17];
+int scores[10];
+LiquidCrystal lcd(RS, E, D4, D5, D6, D7);
+int score = 0;
+int highScore = 0;
 
-void setup()
-{
+void setup() {
   //Setup hardware inputs/outputs. These pins are defined in the hardware_versions header file
 
   //Enable pull ups on inputs
@@ -90,6 +104,57 @@ void setup()
   pinMode(BUZZER, OUTPUT);
 
   Serial.begin(9600);
+
+  Serial.print("Initializing SD card communications...");
+  if ( !SD.begin(4) ) {
+    Serial.println("FAILED");
+    return;
+  }
+  Serial.println("DONE");
+
+  //configure ethernet shield
+  Serial.print("Disable Ethernet...");
+  pinMode(10, OUTPUT);
+  Serial.print("...");
+  digitalWrite(10, HIGH);
+  Serial.println("DONE");
+
+  Serial.print("Creating new Log File...");
+  File logFile = SD.open("highScores.csv", FILE_READ);
+  Serial.print("...");
+  if (logFile) {
+    int count = 0;
+    char c;
+    String curScore = "";
+    while ( logFile.available() ) {
+      if ( c == ',' ) {
+        scores[count ++]  = curScore.toInt();
+        curScore = "";
+      } else {
+        curScore += c;
+      }
+    }
+    Serial.println("DONE");
+    logFile.close();
+  } else {
+    Serial.println("ERROR");
+  }
+
+  highScore = scores[0];
+
+  lcd.begin(16, 2);
+  Serial.print("Initializing Display...");
+  for ( int i = 0; i < 2; i++) {
+    for ( int n = 0; n < 17; n++) {
+      displayContent[i][n] = '-';
+    }
+  }
+  push("HIGHSCORE");
+  push(String(highScore));
+  Serial.println("DONE");
+  Serial.println("SETUP COMPLETE");
+
+  //read SD card
   play_winner(); // After setup is complete, say hello to the world
 }
 
@@ -105,8 +170,28 @@ void loop()
 
   if (play_memory() == true)
     play_winner(); // Player won, play winner tones
-  else
+  else {
+    int tmp = score;
+    int cur = 0;
+    for(int i = 0; i < 10; i++ ){
+      cur = scores[i];
+      if( tmp > cur ){
+        scores[i] = tmp;
+        tmp = cur;
+      }
+    }
+    
+    File logFile = SD.open("highScores.csv", FILE_WRITE);
+    if (logFile) {
+      for( int i = 0; i < 10; i++ ) {
+        logFile.println(String(scores[i]) + ",");
+      }
+      logFile.close();
+    } else {
+      Serial.println("ERROR");
+    }
     play_loser(); // Player lost, play loser tones
+  }
 }
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -135,11 +220,29 @@ boolean play_memory(void)
 
       if (choice != gameBoard[currentMove]) return false; // If the choice is incorect, player loses
     }
-
+    score++;
+    push("Score: " + String(score));
+    push("HighScore: " + String(highScore));
     delay(1000); // Player was correct, delay before playing moves
   }
 
   return true; // Player made it through all the rounds to win!
+}
+
+void push(String text) {
+  String(displayContent[1]).toCharArray( displayContent[0], 17 );
+  //FIXME is buffering strings that are long enough
+  //maybe try turning down to like 14
+  //if ( sizeof(text)/sizeof(char)<16 ) {
+  //  text = bufferString(text, '*');
+  //}
+  text.toCharArray( displayContent[1], 17 );
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.write(displayContent[0]);
+  lcd.setCursor(0, 1);
+  lcd.write(displayContent[1]);
 }
 
 // Plays the current contents of the game moves
@@ -230,7 +333,7 @@ byte checkButton(void)
   Serial.println("G:" + String(digitalRead(BUTTON_GREEN)));
   Serial.println("B:" + String(digitalRead(BUTTON_BLUE)));
   Serial.println("Y:" + String(digitalRead(BUTTON_YELLOW)));
-  delay(1000);
+
   if (digitalRead(BUTTON_RED) == 1) return (CHOICE_RED);
   else if (digitalRead(BUTTON_GREEN) == 1) return (CHOICE_GREEN);
   else if (digitalRead(BUTTON_BLUE) == 1) return (CHOICE_BLUE);
@@ -357,4 +460,3 @@ void attractMode(void)
     if (checkButton() != CHOICE_NONE) return;
   }
 }
-
